@@ -19,7 +19,7 @@ import {
 import { GoogleGenAI } from "@google/genai";
 import { INITIAL_FILES } from './constants';
 import { TEMPLATES } from './templates';
-import { FileNode, ChatMessage, AgentTask, AgentRole, Theme, SaveStatus } from './types';
+import { FileNode, ChatMessage, AgentTask, AgentRole, Theme, SaveStatus, AgentOptions, TargetAgent } from './types';
 import { FileTreeItem } from './components/FileTreeItem';
 import { Editor } from './components/Editor';
 import { Preview } from './components/Preview';
@@ -30,21 +30,14 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 
 // Helper to clean JSON string from Markdown code blocks
 const cleanJson = (text: string) => {
-  // Remove markdown code blocks if present
   const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
   let cleanText = jsonMatch ? jsonMatch[1] : text;
-  
-  // Clean up any potential leading/trailing whitespace or text outside valid JSON
   cleanText = cleanText.trim();
-  
-  // Attempt to find the first '{' and last '}' to isolate JSON object
   const firstBrace = cleanText.indexOf('{');
   const lastBrace = cleanText.lastIndexOf('}');
-  
   if (firstBrace !== -1 && lastBrace !== -1) {
     cleanText = cleanText.substring(firstBrace, lastBrace + 1);
   }
-  
   return cleanText;
 };
 
@@ -104,7 +97,6 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor');
   
-  // Load files from local storage or fall back to initial
   const [files, setFiles] = useState<FileNode[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('symbiotic_files');
@@ -123,31 +115,26 @@ export default function App() {
   const [zenMode, setZenMode] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   
-  // Undo/Redo History Stack (Simplified for active file content)
   const [history, setHistory] = useState<{content: string, timestamp: number}[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  // Keyboard Shortcut State
   const [lastChordTime, setLastChordTime] = useState(0);
   
-  // Chat & Agent State
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState<TargetAgent>('team');
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Layout State
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // --- EFFECTS ---
 
-  // Persist Theme
   useEffect(() => {
     localStorage.setItem('symbiotic_theme', theme);
     document.body.className = theme === 'dark' ? 'bg-[#09090b]' : 'bg-gray-100';
   }, [theme]);
 
-  // Persist Files (Debounced Auto-save)
   useEffect(() => {
     if (saveStatus === 'saving') {
       const timer = setTimeout(() => {
@@ -158,29 +145,21 @@ export default function App() {
     }
   }, [files, saveStatus]);
 
-  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // CMD/CTRL + K -> Start Chord
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         setLastChordTime(Date.now());
       }
-      
-      // Z -> Complete Chord (within 1s)
       if (e.key.toLowerCase() === 'z') {
         if (Date.now() - lastChordTime < 1000) {
           e.preventDefault();
           toggleZenMode();
         }
       }
-
-      // Escape to Exit Zen Mode
       if (e.key === 'Escape' && zenMode) {
         e.preventDefault();
         toggleZenMode();
       }
-
-      // Ctrl/Cmd + S to Save manually
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         setSaveStatus('saving');
@@ -208,7 +187,6 @@ export default function App() {
   const updateFileContent = useCallback((newContent: string) => {
     if (!activeFile) return;
 
-    // Push to history
     const now = Date.now();
     setHistory(prev => {
       const newHistory = prev.slice(0, historyIndex + 1);
@@ -220,7 +198,6 @@ export default function App() {
     setActiveFile(updatedFile);
     setSaveStatus('saving');
     
-    // Update in file tree
     setFiles(prev => prev.map(f => {
       if (f.children) {
         return {
@@ -232,15 +209,17 @@ export default function App() {
     }));
   }, [activeFile, historyIndex]);
 
-  const handleSendMessage = async (target: 'team' | AgentRole) => {
-    if (!inputValue.trim()) return;
+  const handleSendMessage = async (target: TargetAgent, options: AgentOptions) => {
+    // Basic validation
+    if (!inputValue.trim() && !options.image) return;
     
     // 1. Add User Message
     const userMsg: ChatMessage = {
       id: generateId(),
       sender: 'user',
       text: inputValue,
-      timestamp: new Date()
+      timestamp: new Date(),
+      attachment: options.image ? { type: 'image', content: options.image } : undefined
     };
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
@@ -263,27 +242,66 @@ export default function App() {
         const taskId = generateId();
         setTasks(prev => [...prev, {
           id: taskId,
-          title: "Architecture Planning",
+          title: options.useSearch ? "Research & Planning" : "Architecture Planning",
           status: 'active',
           assignedTo: 'architect'
         }]);
 
         try {
+          // CONFIGURE ARCHITECT MODEL
+          let modelName = 'gemini-2.5-flash';
+          let tools: any[] | undefined = undefined;
+          let thinkingConfig: any = undefined;
+
+          // 1. Thinking Mode (Overrides basic settings)
+          if (options.useThinking) {
+             modelName = 'gemini-3-pro-preview';
+             thinkingConfig = { thinkingBudget: 32768 };
+          } 
+          // 2. Search Mode (Only if not Thinking, as per prompt instruction logic - though technically can coexist in some models, prompt says use Flash for Search)
+          else if (options.useSearch) {
+             modelName = 'gemini-2.5-flash';
+             tools = [{ googleSearch: {} }];
+          }
+          // 3. Image Analysis (Must use Pro 3)
+          else if (options.image) {
+             modelName = 'gemini-3-pro-preview';
+          }
+
+          // CONSTRUCT CONTENT
+          const contents: any = options.image 
+            ? {
+                parts: [
+                  { text: `User Request: ${userRequest}.\nAnalyze this image and plan the implementation.` },
+                  { inlineData: { mimeType: 'image/png', data: options.image.split(',')[1] } }
+                ]
+              }
+            : `User Request: ${userRequest}. \n\nAct as a Senior Software Architect. Provide a concise technical plan.`;
+
           const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `User Request: ${userRequest}. \n\nAct as a Senior Software Architect. Provide a concise technical plan. Use Markdown list syntax for bullet points.`,
+            model: modelName,
+            contents: contents,
             config: {
-              systemInstruction: "You are a pragmatic software architect. Analyze the request and propose a concise component structure and state management plan. Keep it under 100 words. Use Markdown formatting (bold key terms, bulleted lists)."
+               systemInstruction: "You are a pragmatic software architect. Analyze the request and propose a concise component structure and state management plan. Use Markdown formatting (bold key terms, bulleted lists).",
+               tools: tools,
+               thinkingConfig: thinkingConfig,
+               // Do not set maxOutputTokens if thinking is enabled
             }
           });
+          
           architectPlan = response.text;
+          
+          const groundingUrls = response.candidates?.[0]?.groundingMetadata?.groundingChunks
+            ?.map((c: any) => c.web ? { title: c.web.title, uri: c.web.uri } : null)
+            .filter(Boolean) || [];
 
           setMessages(prev => [...prev, {
             id: generateId(),
             sender: 'agent',
             agentRole: 'architect',
             text: architectPlan,
-            timestamp: new Date()
+            timestamp: new Date(),
+            groundingUrls: groundingUrls.length > 0 ? groundingUrls : undefined
           }]);
           
           setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
@@ -310,32 +328,34 @@ export default function App() {
           let explanation = "I've written the code.";
           let filename = "Component.tsx";
 
-          if (templateKey && !isEdit) {
-             // USE TEMPLATE
+          if (templateKey && !isEdit && !options.useThinking) {
              const template = TEMPLATES[templateKey];
              generatedCode = template.content;
              filename = template.filename;
              explanation = `I've implemented the **${templateKey}** using our best-practice template. It includes styles and basic functionality.`;
           } else {
-             // USE AI GENERATION
              const systemPrompt = isEdit 
-               ? "You are a Senior React Developer. Modify the provided code based on the user request. Return JSON: { \"filename\": string, \"content\": string, \"explanation\": string }. The explanation should be brief and use Markdown for code references (e.g. `variable`)."
+               ? "You are a Senior React Developer. Modify the provided code based on the user request. Return JSON: { \"filename\": string, \"content\": string, \"explanation\": string }. The explanation should be brief and use Markdown."
                : "You are a Senior React Developer. Create a new React component based on the request. Return JSON: { \"filename\": string, \"content\": string, \"explanation\": string }. File name should end in .tsx. The explanation should be brief and use Markdown.";
              
              const prompt = isEdit 
                ? `Current Code:\n\`\`\`tsx\n${currentCode}\n\`\`\`\n\nRequest: ${userRequest}`
                : `Architect Plan: ${architectPlan}\nRequest: ${userRequest}\n\nGenerate the React component. Use Tailwind CSS and lucide-react icons.`;
+             
+             // Developer uses Flash by default, or Pro if Thinking was used/requested for complex tasks
+             const devModel = options.useThinking ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
+             const devThinkingConfig = options.useThinking ? { thinkingBudget: 32768 } : undefined;
 
              const response = await ai.models.generateContent({
-               model: 'gemini-2.5-flash',
+               model: devModel,
                contents: prompt,
                config: {
                  responseMimeType: "application/json",
-                 systemInstruction: systemPrompt
+                 systemInstruction: systemPrompt,
+                 thinkingConfig: devThinkingConfig
                }
              });
              
-             // Robust JSON Parsing
              try {
                const cleanResponse = cleanJson(response.text);
                const json = JSON.parse(cleanResponse);
@@ -356,7 +376,6 @@ export default function App() {
             timestamp: new Date()
           }]);
 
-          // Update File System
           const newFile: FileNode = {
             name: filename,
             type: 'file',
@@ -370,9 +389,7 @@ export default function App() {
           } else {
             setFiles(prev => {
               const newFiles = [...prev];
-              // Add to src folder (assuming index 0 is src)
               if (newFiles[0].children) {
-                // Remove if exists to overwrite
                 const idx = newFiles[0].children.findIndex(f => f.name === filename);
                 if (idx >= 0) newFiles[0].children.splice(idx, 1);
                 newFiles[0].children.push(newFile);
@@ -381,7 +398,6 @@ export default function App() {
             });
             setActiveFile(newFile);
             setActiveTab('preview');
-            // Update history
             setHistory([{ content: generatedCode, timestamp: Date.now() }]);
             setHistoryIndex(0);
           }
@@ -445,7 +461,6 @@ export default function App() {
       const prevIndex = historyIndex - 1;
       const prevContent = history[prevIndex].content;
       setHistoryIndex(prevIndex);
-      // Update file without pushing to history again
       const updatedFile = { ...activeFile!, content: prevContent };
       setActiveFile(updatedFile);
       setFiles(prev => prev.map(f => {
@@ -465,7 +480,6 @@ export default function App() {
       const nextIndex = historyIndex + 1;
       const nextContent = history[nextIndex].content;
       setHistoryIndex(nextIndex);
-      // Update file without pushing to history
        const updatedFile = { ...activeFile!, content: nextContent };
       setActiveFile(updatedFile);
       setFiles(prev => prev.map(f => {
@@ -480,7 +494,6 @@ export default function App() {
     }
   };
 
-  // Focus input helper
   const focusInput = () => {
     const el = document.querySelector('textarea') as HTMLTextAreaElement;
     if (el) el.focus();
@@ -542,7 +555,6 @@ export default function App() {
         )}
 
         <div className={`p-3 border-t ${theme === 'dark' ? 'border-white/5' : 'border-gray-100'} space-y-2`}>
-           {/* Theme Toggle in Sidebar */}
            <button 
              onClick={toggleTheme}
              className={`w-full flex items-center justify-center p-2 rounded-md transition-colors ${theme === 'dark' ? 'text-gray-500 hover:text-white hover:bg-white/5' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
@@ -585,7 +597,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-             {/* Save Status Indicator */}
              {activeFile && (
                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium transition-all ${
                  saveStatus === 'saving' ? 'bg-yellow-500/10 text-yellow-500' :
@@ -618,7 +629,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Content Area */}
         <div className="flex-1 relative overflow-hidden">
           {!activeFile ? (
             <EmptyState onStart={focusInput} onExampleClick={handleExampleClick} theme={theme} />
@@ -655,6 +665,8 @@ export default function App() {
           isProcessing={isProcessing}
           tasks={tasks}
           theme={theme}
+          selectedAgent={selectedAgent}
+          setSelectedAgent={setSelectedAgent}
         />
       </div>
     </div>

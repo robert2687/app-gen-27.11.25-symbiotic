@@ -10,41 +10,29 @@ import {
   Hexagon,
   Terminal,
   Shield,
-  Copy,
-  Check
+  Paperclip,
+  Globe,
+  BrainCircuit,
+  X,
+  Image as ImageIcon,
+  ExternalLink
 } from 'lucide-react';
-import { ChatMessage, AgentTask, AgentRole, Theme } from '../types';
+import { ChatMessage, AgentTask, AgentRole, Theme, AgentOptions, TargetAgent } from '../types';
 
 // --- Text Formatting Utilities ---
 
 const FormattedText: React.FC<{ text: string; theme: Theme }> = ({ text, theme }) => {
-  // Regex to match code blocks: ```lang\ncode```
-  // Capturing groups: 1=lang, 2=code
   const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
-  
-  // Split text by code blocks
   const parts = text.split(codeBlockRegex);
 
   return (
     <div className="space-y-3">
       {parts.map((part, i) => {
-        // The split result pattern with capturing groups is:
-        // [0]: text before
-        // [1]: lang (group 1)
-        // [2]: code (group 2)
-        // [3]: text after (which becomes text before for next match)
-        // ... and so on.
-        
-        // Render Text Segments (index 0, 3, 6...)
         if (i % 3 === 0) {
           if (!part.trim()) return null;
           return <div key={i} className="whitespace-pre-wrap leading-relaxed">{renderInline(part, theme)}</div>;
         }
-
-        // Skip Language Segments (index 1, 4, 7...) - they are used in the next block
         if (i % 3 === 1) return null;
-
-        // Render Code Blocks (index 2, 5, 8...)
         const lang = parts[i - 1];
         const code = part;
         
@@ -63,24 +51,18 @@ const FormattedText: React.FC<{ text: string; theme: Theme }> = ({ text, theme }
   );
 };
 
-// Helper to render inline markdown: **bold**, `code`
 const renderInline = (text: string, theme: Theme) => {
-  // Split by bold: **text**
   const boldRegex = /\*\*(.*?)\*\*/g;
   const parts = text.split(boldRegex);
   
   return parts.map((part, i) => {
-    // Odd indices are bold text
     if (i % 2 === 1) {
       return <strong key={i} className={`font-semibold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>{part}</strong>;
     }
-    
-    // Split by inline code: `text`
     const codeRegex = /`([^`]+)`/g;
     const subParts = part.split(codeRegex);
     
     return subParts.map((sub, j) => {
-      // Odd indices are inline code
       if (j % 2 === 1) {
         return (
           <code 
@@ -135,6 +117,14 @@ const ChatBubble: React.FC<{ message: ChatMessage, theme: Theme }> = ({ message,
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
+        
+        {/* Attachment Display */}
+        {message.attachment && (
+          <div className="mb-2 max-w-[200px] rounded-lg overflow-hidden border border-white/10">
+            <img src={message.attachment.content} alt="Attachment" className="w-full h-auto" />
+          </div>
+        )}
+
         <div className={`
           px-4 py-3 rounded-2xl text-sm shadow-sm min-w-[200px]
           ${isUser 
@@ -146,55 +136,48 @@ const ChatBubble: React.FC<{ message: ChatMessage, theme: Theme }> = ({ message,
           ) : (
              <FormattedText text={message.text} theme={theme} />
           )}
+
+          {/* Grounding Citations */}
+          {message.groundingUrls && message.groundingUrls.length > 0 && (
+            <div className={`mt-3 pt-3 border-t flex flex-wrap gap-2 ${theme === 'dark' ? 'border-white/10' : 'border-gray-100'}`}>
+              <span className="text-[10px] text-gray-500 w-full font-medium uppercase tracking-wider">Sources</span>
+              {message.groundingUrls.map((url, i) => (
+                <a 
+                  key={i} 
+                  href={url.uri} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full transition-colors ${theme === 'dark' ? 'bg-white/5 hover:bg-white/10 text-indigo-300' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600'}`}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span className="truncate max-w-[150px]">{url.title}</span>
+                </a>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-// --- Agent Selector Types & Data ---
-type TargetAgent = 'team' | AgentRole;
-
 const AGENT_OPTIONS: { id: TargetAgent; label: string; icon: React.ReactNode; color: string; placeholder: string }[] = [
-  { 
-    id: 'team', 
-    label: 'Team', 
-    icon: <Users className="w-3.5 h-3.5" />, 
-    color: 'bg-indigo-500', 
-    placeholder: "Describe what you want to build..." 
-  },
-  { 
-    id: 'architect', 
-    label: 'Architect', 
-    icon: <Hexagon className="w-3.5 h-3.5" />, 
-    color: 'bg-purple-500', 
-    placeholder: "Ask about structure, design patterns, or requirements..." 
-  },
-  { 
-    id: 'developer', 
-    label: 'Developer', 
-    icon: <Terminal className="w-3.5 h-3.5" />, 
-    color: 'bg-blue-500', 
-    placeholder: "Ask for code, specific components, or implementation details..." 
-  },
-  { 
-    id: 'qa', 
-    label: 'QA', 
-    icon: <Shield className="w-3.5 h-3.5" />, 
-    color: 'bg-orange-500', 
-    placeholder: "Ask to run tests, check for bugs, or verify accessibility..." 
-  },
+  { id: 'team', label: 'Team', icon: <Users className="w-3.5 h-3.5" />, color: 'bg-indigo-500', placeholder: "Describe what you want to build..." },
+  { id: 'architect', label: 'Architect', icon: <Hexagon className="w-3.5 h-3.5" />, color: 'bg-purple-500', placeholder: "Ask about structure & design..." },
+  { id: 'developer', label: 'Developer', icon: <Terminal className="w-3.5 h-3.5" />, color: 'bg-blue-500', placeholder: "Ask for code & implementation..." },
+  { id: 'qa', label: 'QA', icon: <Shield className="w-3.5 h-3.5" />, color: 'bg-orange-500', placeholder: "Ask to verify code..." },
 ];
 
-// --- Main Chat Interface Props ---
 interface ChatInterfaceProps {
   messages: ChatMessage[];
   inputValue: string;
   setInputValue: (val: string) => void;
-  onSendMessage: (target: TargetAgent) => void;
+  onSendMessage: (target: TargetAgent, options: AgentOptions) => void;
   isProcessing: boolean;
   tasks: AgentTask[];
   theme: Theme;
+  selectedAgent: TargetAgent;
+  setSelectedAgent: (agent: TargetAgent) => void;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
@@ -204,12 +187,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   onSendMessage,
   isProcessing,
   tasks,
-  theme
+  theme,
+  selectedAgent,
+  setSelectedAgent
 }) => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const [selectedAgent, setSelectedAgent] = useState<TargetAgent>('team');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [useSearch, setUseSearch] = useState(false);
+  const [useThinking, setUseThinking] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
 
-  // Auto-scroll logic
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTo({
@@ -222,7 +210,29 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSendMessage(selectedAgent);
+      handleSend();
+    }
+  };
+
+  const handleSend = () => {
+    if ((!inputValue.trim() && !attachedImage) || isProcessing) return;
+    
+    onSendMessage(selectedAgent, {
+      useSearch,
+      useThinking,
+      image: attachedImage || undefined
+    });
+    setAttachedImage(null);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAttachedImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -239,7 +249,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           </div>
           <div>
             <span className={`font-semibold text-sm block leading-tight ${theme === 'dark' ? 'text-gray-200' : 'text-gray-800'}`}>AI Team</span>
-            <span className="text-[10px] text-gray-500 block leading-tight">Gemini 2.0 Flash</span>
+            <span className="text-[10px] text-gray-500 block leading-tight">Gemini 2.0 Flash / Pro 3</span>
           </div>
         </div>
       </div>
@@ -269,7 +279,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         )}
       </div>
 
-      {/* Active Tasks/Plan (Sticky at bottom of chat) */}
+      {/* Active Tasks */}
       {tasks.length > 0 && (
         <div className={`border-t shrink-0 ${theme === 'dark' ? 'border-white/10 bg-[#0e0e11]' : 'border-gray-200 bg-white'}`}>
            <div className={`px-4 py-2 flex items-center justify-between cursor-help border-b ${theme === 'dark' ? 'bg-[#18181b] border-white/5' : 'bg-gray-50 border-gray-100'}`}>
@@ -310,40 +320,88 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Input Area */}
       <div className={`p-4 border-t shrink-0 ${theme === 'dark' ? 'border-white/10 bg-[#111116]' : 'border-gray-200 bg-white'}`}>
         
-        {/* Agent Selector */}
-        <div className="flex gap-2 mb-3 overflow-x-auto no-scrollbar pb-1">
-          {AGENT_OPTIONS.map(opt => (
-            <button
-              key={opt.id}
-              onClick={() => setSelectedAgent(opt.id)}
-              className={`
-                flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border
-                ${selectedAgent === opt.id 
-                  ? `${opt.color} text-white border-transparent shadow-lg shadow-${opt.color.replace('bg-', '')}/20` 
-                  : `${theme === 'dark' ? 'bg-[#1e1e24] text-gray-400 border-white/5 hover:bg-white/5 hover:border-white/10' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              `}
-            >
-              {opt.icon}
-              {opt.label}
-            </button>
-          ))}
+        {/* Agent & Feature Selectors */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <div className="flex gap-1 overflow-x-auto no-scrollbar max-w-[60%]">
+            {AGENT_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setSelectedAgent(opt.id)}
+                className={`
+                  flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border shrink-0
+                  ${selectedAgent === opt.id 
+                    ? `${opt.color} text-white border-transparent shadow-lg shadow-${opt.color.replace('bg-', '')}/20` 
+                    : `${theme === 'dark' ? 'bg-[#1e1e24] text-gray-400 border-white/5 hover:bg-white/5 hover:border-white/10' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+                `}
+              >
+                {opt.icon}
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          
+          <div className={`h-4 w-px ${theme === 'dark' ? 'bg-white/10' : 'bg-gray-300'}`} />
+
+          <button 
+             onClick={() => setUseSearch(!useSearch)}
+             className={`p-1.5 rounded-md transition-all ${useSearch ? 'bg-blue-500/20 text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}
+             title="Enable Web Search"
+          >
+            <Globe className="w-4 h-4" />
+          </button>
+          <button 
+             onClick={() => setUseThinking(!useThinking)}
+             className={`p-1.5 rounded-md transition-all ${useThinking ? 'bg-purple-500/20 text-purple-400' : 'text-gray-500 hover:text-gray-300'}`}
+             title="Enable Deep Thinking"
+          >
+            <BrainCircuit className="w-4 h-4" />
+          </button>
         </div>
 
-        <div className="relative group">
-          <textarea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder={currentAgent.placeholder}
-            className={`w-full border rounded-xl pl-4 pr-12 py-3.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none h-[60px] transition-all placeholder:text-gray-500 ${theme === 'dark' ? 'bg-[#1e1e24] border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-900 focus:bg-white'}`}
-          />
+        {/* Attachment Preview */}
+        {attachedImage && (
+          <div className="mb-2 relative w-fit group">
+            <img src={attachedImage} alt="Preview" className="h-16 w-auto rounded-lg border border-white/10" />
+            <button 
+              onClick={() => setAttachedImage(null)}
+              className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        <div className="relative group flex gap-2">
           <button 
-            onClick={() => onSendMessage(selectedAgent)}
-            disabled={!inputValue.trim() || isProcessing}
-            className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
+             onClick={() => fileInputRef.current?.click()}
+             className={`p-3 rounded-xl border flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-[#1e1e24] border-white/10 text-gray-400 hover:text-white' : 'bg-gray-50 border-gray-200 text-gray-500 hover:text-gray-800'}`}
           >
-            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            <Paperclip className="w-5 h-5" />
           </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="image/*"
+            onChange={handleImageUpload}
+          />
+          
+          <div className="relative flex-1">
+            <textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder={currentAgent.placeholder}
+              className={`w-full border rounded-xl pl-4 pr-12 py-3.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none h-[50px] transition-all placeholder:text-gray-500 ${theme === 'dark' ? 'bg-[#1e1e24] border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-900 focus:bg-white'}`}
+            />
+            <button 
+              onClick={handleSend}
+              disabled={(!inputValue.trim() && !attachedImage) || isProcessing}
+              className="absolute right-2 top-1.5 bottom-1.5 aspect-square flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
+            >
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
       </div>
     </div>
