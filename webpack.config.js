@@ -7,7 +7,7 @@ import { loadEnv } from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export default (envObj) => {
+export default (envObj = {}) => {
     const mode = envObj.mode || 'development';
     const env = loadEnv(mode, process.cwd(), '');
 
