@@ -336,26 +336,26 @@ export default function App ()
         try
         {
           // CONFIGURE ARCHITECT MODEL
-          let modelName = 'gemini-2.5-flash';
+          let modelName = 'gemini-2.0-flash-exp';
           let tools: any[] | undefined = undefined;
           let thinkingConfig: any = undefined;
 
           // 1. Thinking Mode (Overrides basic settings)
           if ( options.useThinking )
           {
-            modelName = 'gemini-3-pro-preview';
+            modelName = 'gemini-2.0-flash-thinking-exp-01-21';
             thinkingConfig = { thinkingBudget: 32768 };
           }
           // 2. Search Mode (Only if not Thinking, as per prompt instruction logic - though technically can coexist in some models, prompt says use Flash for Search)
           else if ( options.useSearch )
           {
-            modelName = 'gemini-2.5-flash';
+            modelName = 'gemini-2.0-flash-exp';
             tools = [ { googleSearch: {} } ];
           }
           // 3. Image Analysis (Must use Pro 3)
           else if ( options.image )
           {
-            modelName = 'gemini-3-pro-preview';
+            modelName = 'gemini-2.0-flash-thinking-exp-01-21';
           }
 
           // CONSTRUCT CONTENT
@@ -438,7 +438,7 @@ export default function App ()
               : `Architect Plan: ${ architectPlan }\nRequest: ${ userRequest }\n\nGenerate the React component. Use Tailwind CSS and lucide-react icons.`;
 
             // Developer uses Flash by default, or Pro if Thinking was used/requested for complex tasks
-            const devModel = options.useThinking ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
+            const devModel = options.useThinking ? 'gemini-2.0-flash-thinking-exp-01-21' : 'gemini-2.0-flash-exp';
             const devThinkingConfig = options.useThinking ? { thinkingBudget: 32768 } : undefined;
 
             const response = await ai.models.generateContent( {
@@ -528,7 +528,7 @@ export default function App ()
           try
           {
             const response = await ai.models.generateContent( {
-              model: 'gemini-2.5-flash',
+              model: 'gemini-2.0-flash-exp',
               contents: `Review this React code for errors, accessibility, and best practices. Keep it concise (max 2 sentences). Use Markdown to bold key findings. Code: ${ codeToReview.substring( 0, 2000 ) }...`,
             } );
 
